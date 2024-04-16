@@ -1,162 +1,361 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>Today's heart rate</title>
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-    <script src="jqFhir.js"></script>
+<title>HTML5 WebBLE Gateway for heart rate</title>
+<style type="text/css">
+    canvas { border: 1px solid black; }
+    textarea { resize: both; font-family: Consolas,Monaco,Lucida Console,Liberation Mono,DejaVu Sans Mono,Bitstream Vera Sans Mono,Courier New, monospace; }
+    div.bpm { display: inline; }
+    #bpmValue { padding-left: 10px; padding-right: 10px; font-weight: bold; }
+    #myProgramArea { background: grey; }
+    
+</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/codemirror.css">
+
 </head>
-<body>
+<body onload="init();">
 
-    <div id="plot_area" style="width:1000px;height:350px;"></div>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/codemirror.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/mode/javascript/javascript.js"></script>
 
-    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-    <script type="module">
-        const startingvalues = 30;  //initial values
-        var HRvalues = [];
-        var Dates = [];
-        var lastdate = new Date();
-        lastdate.setMinutes(lastdate.getMinutes() - 30); //gets only values from the last x min
-        console.log(lastdate);
+<script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<p>
+<div class="bpm">Heart Rate:</div>
+<div class="bpm" id="bpmValue">110</div>
+<div class="bpm">BPM</div>
+</p>
+<p>
+<div class="spe">Speed</div>
+<div class="spe" id="speedDisplay">Speed here</div>
+<div class="spe">WOW COOOL</div>
+</p>
+<div id="graph" class="gauge"></div>
 
-    async function GetHR(){
+<canvas id="myCanvas" width="600" height="341"></canvas>
+<p>
+<div id="bpmGauge" class="gauge"></div>
 
-        var client = jqFhir({ baseUrl: 'https://hapi.prod.cloud.cbh.kth.se/fhir' });
+<canvas id="myCanvas1" width="600" height="341"></canvas>
+<p>
+<button onclick="start()">Start sensor</button>
+<button onclick="stop()">Stop sensor</button>
+</p>
+
+<div hidden id="myProgramArea">
+Init Function<br>
+<textarea id="funcInit" rows="6" cols="80">
+// These instructions are only executed once at the start
+m = 0;
+</textarea><br>
+Handle New Signal Value Function<br>
+<form><textarea id="funcHandleSignalValue" rows="10">
+// These instructions are executed for every new heart signal value
+// The new value is found the variable 'signal'
+
+//setMean(m);  // Make the value for the red curve
+//m = Math.round(signal * 0.5);
+
+// useful instructions:
+//now = runningTime()
+//setBPM(123);  // Set the BPM value
+//blink(1);     // turn the blink of the BPM value on
+//blink(0);     // turn the blink of the BPM value off
+
+</textarea></form><br>
+<button onclick="program()">Program sensor</button>
+</div>
 
 
-        let searchParams = new URLSearchParams(window.location.search)
-        searchParams.has('id')
-        var patientId = searchParams.get('id') //gets patientid from searchbar
+<script>
+                                         
+var canvas, ctx, ctx1, val,lineChart, requestId, speedDisplay;
+var chart;
+var signal;
+var signalArray = [];
+var filterArray = [];
 
-        const today = new Date();
+var oldTime;
 
-        client.search({
-          type: 'Observation',
-          query: {
-            _count: startingvalues,
-            patient: {
-              $type: 'Patient',
-              _id: patientId
+var targetDevice;
+var charUARTRX;
+var myFunction;
+
+
+const BLE_UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const BLE_UART_RX_CHAR = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+
+
+
+
+// Update the gauge when bpmValue changes
+function updateBpmValue(newBpmValue) {
+    chart.data.datasets[0].data[0] = newBpmValue;
+    chart.data.datasets[0].data[1] = 220 - newBpmValue; // Adjust 220 to your max value
+    chart.update();
+}
+
+
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+function init()
+{
+    canvas = document.getElementById('myCanvas');
+    val = document.getElementById('bpmValue');
+    speedDisplay = document.getElementById('speedDisplay');
+    ctx = canvas.getContext('2d');
+    for (i=0; i < canvas.width/2; i++) {
+        signalArray.push(100);
+        filterArray.push(100);
+    }
+    oldTime = new Date();
+    console.log("init");
+    ctx1 = document.getElementById('myCanvas1').getContext('2d');
+    chart = new Chart(ctx1, {
+        type: 'doughnut',
+        data: {
+            datasets: [{
+            data: [100, 20, 100], // Three sections: 50%, 30%, and 20%
+            backgroundColor: [
+                'rgba(255, 255, 224, 0.2)', // Color for the first section (light yellow)
+                'rgba(0, 128, 0, 0.5)', // Color for the second section (green)
+                'rgba(255, 255, 224, 0.8)'  // Color for the third section (light yellow)
+            ],
+                borderColor: [
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(0, 0, 0, 0.1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            circumference: 200,
+            rotation: -100,
+            cutoutPercentage: 10, // Adjust to change the thickness of the gauge
+            responsive: true,
+            animation: {
+                animateRotate: false
             },
-            date :{
-              $gt: lastdate.toISOString()
-            },  
-              _sort: 'date'
-          }}).then(res => {
-            console.log(res);
-            console.log("res");
-
-            for (const entry of res.entry) {
-        
-
-                if(HRvalues.length > startingvalues)  {
-                  Dates.shift();
-                  HRvalues.shift();
-                }
-                Dates.push(new Date(entry.resource.effectiveInstant));
-                HRvalues.push(entry.resource.valueQuantity.value);
-                lastdate = new Date(entry.resource.effectiveInstant);
+            tooltips: {
+                enabled: true,
+                callbacks: {
+                    label: function(tooltipItem, data) {
+                        // Assuming the BPM value is stored in a variable called bpmValue
+                        return 'BPM: ' + val;
+                    }
+                },
+                displayColors: false
+            }
         }
-
-        console.log(lastdate);
-      }).then(plot);
-      };
-
-
-
-/*
-        async function GetHR1(){
-        var client = jqFhir({ baseUrl: 'https://hapi.prod.cloud.cbh.kth.se/fhir' });
-
-        let searchParams = new URLSearchParams(window.location.search)
-        searchParams.has('id')
-        var patientId = searchParams.get('id')
-        console.log("GetID");
-
-        const today = new Date();
-
-        client.search({
-          type: 'Observation',
-          query: {
-            _count: 10,
-            patient: {
-              $type: 'Patient',
-              _id: patientId
+    });
+    lineChart = new Chart(ctx1, {
+        type: 'line',
+        data: {
+            datasets: [{
+                data: [{x: indicatorValue, y: 0}], // Replace indicatorValue with the actual value
+                pointBackgroundColor: 'red', // Color of the indicator
+                pointBorderColor: 'red',
+                pointRadius: 10, // Size of the indicator
+                fill: false,
+                showLine: false // Hide the line
+            }]
+        },
+        options: {
+            scales: {
+                xAxes: [{
+                    display: false, // Hide the x-axis
+                    ticks: {
+                        min: 0, // Minimum value
+                        max: 100 // Maximum value
+                    }
+                }],
+                yAxes: [{
+                    display: false // Hide the y-axis
+                }]
             },
-            date :{
-              $gt: lastdate.toISOString()
+            tooltips: {
+                enabled: false // Hide the tooltips
             },
-            _sort: '-date'
-          }}).then(res => {
-            console.log(res);
-            for (const entry of res.entry) {
-        
-              console.log("lastdate", lastdate.toISOString());
-              console.log("newentry", entry.resource.effectiveInstant);
-
-                  Dates.push(new Date(entry.resource.effectiveInstant));
-                  lastdate = new Date(entry.resource.effectiveInstant);
-                  HRvalues.push(entry.resource.valueQuantity.value);
-                  console.log("^This one^")
-            
+            legend: {
+                display: false // Hide the legend
+            }
         }
-      }).then(plot);
-      };
-*/
+    });
+    
+
+}
+
+function startBluetooth()
+{
+    console.log('Requesting Bluetooth Device...');
+    navigator.bluetooth.requestDevice({filters: [                                                                                   {services: [BLE_UART_SERVICE]},
+                                          {namePrefix: 'BBC micro:bit '}]})
+    .then(device => {
+          console.log('Connecting to GATT Server...');
+          targetDevice = device;
+          return device.gatt.connect();
+    })
+    .then(server => {
+          console.log('Getting Service...');
+          return server.getPrimaryService(BLE_UART_SERVICE);
+    })
+    .then(service => {
+          console.log('Got service');
+          return service.getCharacteristic(BLE_UART_RX_CHAR);
+    })
+    .then(characteristic => {
+          console.log('Got char');
+          charUARTRX = characteristic;
+          return charUARTRX.startNotifications();
+    })
+    .then(_ => {
+          console.log('Notifications started');
+          charUARTRX.addEventListener('characteristicvaluechanged',
+                                            handleNotifications);
+    })
+    .catch(error =>{
+         console.log(error);
+    });
+}
+
+
+function animationLoop(timestamp)
+{
+    //console.log("animate");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.font = "12px Arial";
+    ctx.fillStyle = "#FF0000";
+    ctx.strokeStyle = "#000000";
+    
+    //var ctx = c.getContext("2d");
+    ctx.beginPath(0, canvas.height - signalArray[0]*canvas.height/1023);
+    for(i = 1; i < signalArray.length; i++){
+        ctx.lineTo(2*i, canvas.height - signalArray[i]*canvas.height/1023);
+    }
+    ctx.stroke();
+    
+    ctx.strokeStyle = "#FF0000";
+    ctx.beginPath(0, canvas.height - filterArray[0]*canvas.height/1023);
+    for (i = 1; i < filterArray.length; i++) {
+        ctx.lineTo(2*i, canvas.height - filterArray[i]*canvas.height/1023);
+    }
+    ctx.stroke();
+    
+    requestId = requestAnimationFrame(animationLoop);
+}
+
+function handleNotifications(event)
+{
+    var result = "";
+    for (i = 0; i < event.target.value.byteLength; i++) {
+        result += String.fromCharCode(event.target.value.getUint8(i));
+    }
+
+    console.log(result);
+    var values = result.split(' ');
+    
+    signal = parseInt(values[0]);
+    
+    signalArray.shift();
+    signalArray.push(signal);
+    
+    if (myFunction) {
+        eval(myFunction);
+        return;
+    }
+    
+    if (values.length >= 2) {
+        filterArray.shift();
+        filterArray.push(parseInt(values[1]));
+    }
+    
+    if (values.length >= 3) {
+        setBPM(parseInt(values[2]));
+        speedconv(parseInt(values[3]))
+    }
+    updateBpmValue(values[2]);
+    
+}
+
+// Function to convert speed to text
+function speedconv(speed){
+    const speedTexts = ["No compressions", "Too slow", "Continue like this", "Too fast"];
+    speedDisplay.textContent = speedTexts[speed] || "Unknown speed" ;
+}
 
 
 
 
-    async function plot(){
-      console.log(HRvalues);
-      console.log(Dates);
-      Plotly.purge("plot_area");
-      const plotly_elem = document.getElementById('plot_area');
-        const plotly_layout = {
-          margin: {t: 50},
-          title: 'Heart Rate (Beats per Minute)',
-          grid: { rows: 1, columns: 2, pattern: "independent" }
-        };
-        const x1 = Array.from({ length: HRvalues.length }, (_, index) => index);
-        const plotly_data = [{
-          x: Dates,
-          y: HRvalues,
-          type: 'scatter', 
-          name: 'heartrate'
-        },{
-          type: "indicator", value: HRvalues[HRvalues.length-1], // Most recent value
-          mode: "gauge+number+delta",
-          delta: { reference: HRvalues[HRvalues.length-2] }, //Last Value 
-          gauge: { axis: { visible: false, range: [0, 200] },
-          bar: { color: 'navy'},
-          steps: [
-        { range: [0, 30], color: 'salmon' },
-        { range: [30, 50], color: 'lightyellow' },
-        { range: [50, 90], color: 'palegreen' },
-        { range: [90, 110], color: 'lightyellow' },
-        { range: [110, 200], color: 'salmon' }
-           ]
-           }, 
-          domain: { row: 0, column: 1 
-          }
-     }];
+
+function setBPM(bpm)
+{
+    val.textContent = bpm;
+}
+
+function setMean(mean)
+{
+    filterArray.shift();
+    filterArray.push(mean);
+}
+
+function runningTime()
+{
+    return Date.now()
+}
+
+function blink(onoff)
+{
+    if (onoff)
+        val.style.background = "#F55";
+    else
+        val.style.background = "#FFF";
+}
 
 
-        Plotly.newPlot(plotly_elem, plotly_data, plotly_layout);
-      }
+function start()
+{
+    // Start the animation loop, targets 60 frames/s
+    eval(document.getElementById('funcInit').value);
+    startBluetooth();
+    requestId = requestAnimationFrame(animationLoop);
+}
 
 
+function stop()
+{
+    if (requestId) {
+        cancelAnimationFrame(requestId);
+    }
+    
+    if (charUARTRX) {
+        charUARTRX.stopNotifications()
+        .then(_ => {
+            console.log('Notifications stopped');
+            charUARTRX.removeEventListener('characteristicvaluechanged',
+                                           handleNotifications);
+            charUARTRX = null;
+            targetDevice.gatt.disconnect();
+        })
+        .catch(error => {
+            console.log('Argh! ' + error);
+        });
+    }
+}
 
+function program()
+{
+    editor1.save();
+    editor2.save();
+    myFunction = document.getElementById('funcHandleSignalValue').value;
+    eval(document.getElementById('funcInit').value);
+}
 
-      GetHR();
-
-
-
-
-      const interval = window.setInterval(function() {
-        GetHR();
- }, 15000);
-
-    </script>
+</script>
 </body>
 </html>
