@@ -7,73 +7,57 @@
     textarea { resize: both; font-family: Consolas,Monaco,Lucida Console,Liberation Mono,DejaVu Sans Mono,Bitstream Vera Sans Mono,Courier New, monospace; }
     div.bpm { display: inline; }
     #bpmValue { padding-left: 10px; padding-right: 10px; font-weight: bold; }
-    #myProgramArea { background: grey; }
+    #myCanvas,
+    #plotlyGauge,
+    #plotlyBar {
+        display: inline-block;
+        vertical-align: top;
+    }
     
+    /* Adjust the width of the plotly bar */
+    #plotlyBar {
+        width: 200px; /* Set your desired width */
+        display: inline-block;
+        vertical-align: top;
+    }
+    
+    #plotlyGauge {
+        margin-left: 20px;
+    }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/codemirror.css">
 
 </head>
 <body onload="init();">
 
+
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/codemirror.min.js"></script>
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/mode/javascript/javascript.js"></script>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 
-<script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <p>
-<div class="bpm">Heart Rate:</div>
-<div class="bpm" id="bpmValue">110</div>
+<div class="bpm">CPR Rate:</div>
+<div class="bpm" id="bpmValue">60</div>
 <div class="bpm">BPM</div>
 </p>
-<p>
-<div class="spe">Speed</div>
-<div class="spe" id="speedDisplay">Speed here</div>
-<div class="spe">WOW COOOL</div>
-</p>
-<div id="graph" class="gauge"></div>
 
-<canvas id="myCanvas" width="600" height="341"></canvas>
-<p>
-<div id="bpmGauge" class="gauge"></div>
-
-<canvas id="myCanvas1" width="600" height="341"></canvas>
+<canvas id="myCanvas" width="400" height="341"></canvas>
+<div id="plotlyGauge" ></div>
+<div id="plotlyBar" ></div>
 <p>
 <button onclick="start()">Start sensor</button>
 <button onclick="stop()">Stop sensor</button>
 </p>
 
-<div hidden id="myProgramArea">
-Init Function<br>
-<textarea id="funcInit" rows="6" cols="80">
-// These instructions are only executed once at the start
-m = 0;
-</textarea><br>
-Handle New Signal Value Function<br>
-<form><textarea id="funcHandleSignalValue" rows="10">
-// These instructions are executed for every new heart signal value
-// The new value is found the variable 'signal'
-
-//setMean(m);  // Make the value for the red curve
-//m = Math.round(signal * 0.5);
-
-// useful instructions:
-//now = runningTime()
-//setBPM(123);  // Set the BPM value
-//blink(1);     // turn the blink of the BPM value on
-//blink(0);     // turn the blink of the BPM value off
-
-</textarea></form><br>
-<button onclick="program()">Program sensor</button>
-</div>
-
 
 <script>
                                          
-var canvas, ctx, ctx1, val,lineChart, requestId, speedDisplay;
-var chart;
+var canvas, ctx, val, requestId;
+
 var signal;
 var signalArray = [];
 var filterArray = [];
+var threshold = 2000;
 
 var oldTime;
 
@@ -81,33 +65,83 @@ var targetDevice;
 var charUARTRX;
 var myFunction;
 
-
 const BLE_UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const BLE_UART_RX_CHAR = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 
+// Create the data for the plot
+var data = [{
+    type: "indicator",
+    mode: "gauge",
+    value: 110,
+    title: {text: "CPR Rate"},
+    domain: {x: [0, 1], y: [0, 1]},
+    gauge: { axis: { visible: false, range: [60, 160] },
+          bar: { color: 'navy'},
+          steps: [
+        { range: [60, 90], color: 'salmon' },
+        { range: [90, 100], color: 'lightyellow' },
+        { range: [100, 120], color: 'palegreen' },
+        { range: [120, 130], color: 'lightyellow' },
+        { range: [130, 160], color: 'salmon' }
+           ]
+           }
+}];
 
+// Create the layout for the plot
+var layout = {
+    width: 500,
+    height: 400,
+    margin: {t: 0, b: 0, l: 0, r: 0},
+    paper_bgcolor: "white",
+    font: {color: "black"}
+};
 
+function createPlotlyBar(data) {
+    var plotlyData = [{
+        x: ['Pressure Level'],
+        y: [data],
+        type: 'bar',
+        orientation: 'v'
+    }];
 
+    var layout = {
+        yaxis: {
+            range: [0, threshold], // Define the range of the x-axis (adjust as needed)
+            showticklabels: false // Hide y-axis scale
+        },
+        margin: {t: 50, b: 120, l: 50, r: 50} // Move the bar graph 50 points up
+    };
 
-// Update the gauge when bpmValue changes
-function updateBpmValue(newBpmValue) {
-    chart.data.datasets[0].data[0] = newBpmValue;
-    chart.data.datasets[0].data[1] = 220 - newBpmValue; // Adjust 220 to your max value
-    chart.update();
+    Plotly.newPlot('plotlyBar', plotlyData, layout);
 }
 
+
+// Update the Plotly graph when new data is received
+function updatePlotlyBar(newValue, lastValue, lastlastValue) {
+    // checks for a peak in the data
+    if (newValue < lastValue && lastValue > lastlastValue) {
+        if (lastValue > threshold) { // if the peak is above the threshold
+            Plotly.restyle('plotlyBar', 'x', [['Good Pressure']]);
+            Plotly.restyle('plotlyBar', 'marker.color', ['green']);
+        }
+       else {
+            Plotly.restyle('plotlyBar', 'x', [['Not enough Pressure']]);
+            Plotly.restyle('plotlyBar', 'marker.color', ['red']);
+        }
+    };
+    Plotly.restyle('plotlyBar', 'y', [[newValue]]);
+
+}
 
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-
 function init()
 {
     canvas = document.getElementById('myCanvas');
     val = document.getElementById('bpmValue');
-    speedDisplay = document.getElementById('speedDisplay');
     ctx = canvas.getContext('2d');
     for (i=0; i < canvas.width/2; i++) {
         signalArray.push(100);
@@ -115,79 +149,12 @@ function init()
     }
     oldTime = new Date();
     console.log("init");
-    ctx1 = document.getElementById('myCanvas1').getContext('2d');
-    chart = new Chart(ctx1, {
-        type: 'doughnut',
-        data: {
-            datasets: [{
-            data: [100, 20, 100], // Three sections: 50%, 30%, and 20%
-            backgroundColor: [
-                'rgba(255, 255, 224, 0.2)', // Color for the first section (light yellow)
-                'rgba(0, 128, 0, 0.5)', // Color for the second section (green)
-                'rgba(255, 255, 224, 0.8)'  // Color for the third section (light yellow)
-            ],
-                borderColor: [
-                    'rgba(75, 192, 192, 1)',
-                    'rgba(0, 0, 0, 0.1)'
-                ],
-                borderWidth: 1
-            }]
-        },
-        options: {
-            circumference: 200,
-            rotation: -100,
-            cutoutPercentage: 10, // Adjust to change the thickness of the gauge
-            responsive: true,
-            animation: {
-                animateRotate: false
-            },
-            tooltips: {
-                enabled: true,
-                callbacks: {
-                    label: function(tooltipItem, data) {
-                        // Assuming the BPM value is stored in a variable called bpmValue
-                        return 'BPM: ' + val;
-                    }
-                },
-                displayColors: false
-            }
-        }
-    });
-    lineChart = new Chart(ctx1, {
-        type: 'line',
-        data: {
-            datasets: [{
-                data: [{x: indicatorValue, y: 0}], // Replace indicatorValue with the actual value
-                pointBackgroundColor: 'red', // Color of the indicator
-                pointBorderColor: 'red',
-                pointRadius: 10, // Size of the indicator
-                fill: false,
-                showLine: false // Hide the line
-            }]
-        },
-        options: {
-            scales: {
-                xAxes: [{
-                    display: false, // Hide the x-axis
-                    ticks: {
-                        min: 0, // Minimum value
-                        max: 100 // Maximum value
-                    }
-                }],
-                yAxes: [{
-                    display: false // Hide the y-axis
-                }]
-            },
-            tooltips: {
-                enabled: false // Hide the tooltips
-            },
-            legend: {
-                display: false // Hide the legend
-            }
-        }
-    });
-    
+    Plotly.newPlot('plotlyGauge', data, layout);
 
+    // Call the function to create the Plotly graph with initial data
+    createPlotlyBar(10); // Assuming initial value is 0
+
+    
 }
 
 function startBluetooth()
@@ -223,7 +190,6 @@ function startBluetooth()
     });
 }
 
-
 function animationLoop(timestamp)
 {
     //console.log("animate");
@@ -248,10 +214,30 @@ function animationLoop(timestamp)
     ctx.stroke();
     
     requestId = requestAnimationFrame(animationLoop);
+
+}
+function updatePlot(newVal, iscpr) {
+    // Update the value
+    if (iscpr == 0) {
+        data[0].title = "No CPR";
+        data[0].value = 0;
+    } else { 
+        data[0].value = newVal;
+        if (newVal < 100) {
+            data[0].title = "Too slow";
+        } else if (newVal > 120) {
+            data[0].title = "Too fast";
+        } else {
+            data[0].title = "Good";
+        }
+    }
+    
+
+    // Replot the plot
+    Plotly.react('plotlyGauge', data, layout);
 }
 
-function handleNotifications(event)
-{
+function handleNotifications(event){
     var result = "";
     for (i = 0; i < event.target.value.byteLength; i++) {
         result += String.fromCharCode(event.target.value.getUint8(i));
@@ -260,11 +246,19 @@ function handleNotifications(event)
     console.log(result);
     var values = result.split(' ');
     
+    if (values[0] == "BPM") {
+        setBPM(parseInt(values[1]));
+        return;
+    }
+    
     signal = parseInt(values[0]);
     
     signalArray.shift();
     signalArray.push(signal);
+  
     
+
+
     if (myFunction) {
         eval(myFunction);
         return;
@@ -277,21 +271,12 @@ function handleNotifications(event)
     
     if (values.length >= 3) {
         setBPM(parseInt(values[2]));
-        speedconv(parseInt(values[3]))
     }
-    updateBpmValue(values[2]);
-    
+
+    updatePlot(parseInt(values[2]), parseInt(values[3]));
+    // Call this function whenever you receive new data
+    updatePlotlyBar(signalArray[signalArray.length - 1], signalArray[signalArray.length - 2], signalArray[signalArray.length - 3]);
 }
-
-// Function to convert speed to text
-function speedconv(speed){
-    const speedTexts = ["No compressions", "Too slow", "Continue like this", "Too fast"];
-    speedDisplay.textContent = speedTexts[speed] || "Unknown speed" ;
-}
-
-
-
-
 
 function setBPM(bpm)
 {
@@ -320,8 +305,6 @@ function blink(onoff)
 
 function start()
 {
-    // Start the animation loop, targets 60 frames/s
-    eval(document.getElementById('funcInit').value);
     startBluetooth();
     requestId = requestAnimationFrame(animationLoop);
 }
@@ -348,13 +331,6 @@ function stop()
     }
 }
 
-function program()
-{
-    editor1.save();
-    editor2.save();
-    myFunction = document.getElementById('funcHandleSignalValue').value;
-    eval(document.getElementById('funcInit').value);
-}
 
 </script>
 </body>
