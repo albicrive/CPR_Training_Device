@@ -24,6 +24,10 @@
     #plotlyGauge {
         margin-left: 20px;
     }
+
+    #circleCanvas {
+        border: 1px solid transparent;
+    }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/codemirror.css">
 
@@ -42,8 +46,13 @@
 </p>
 
 <canvas id="myCanvas" width="400" height="341"></canvas>
-<div id="plotlyGauge" ></div>
-<div id="plotlyBar" ></div>
+<div id="plotlyGauge"></div>
+<div id="plotlyBar"></div>
+</p>
+<canvas id="circleCanvas" width="500" height="500"></canvas>
+<p>
+<div id="horizontalBar"></div>
+</p>
 <p>
 <button onclick="start()">Start sensor</button>
 <button onclick="stop()">Stop sensor</button>
@@ -57,7 +66,8 @@ var canvas, ctx, val, requestId;
 var signal;
 var signalArray = [];
 var filterArray = [];
-var threshold = 2000;
+var thirdArray = [];
+var threshold = 50;
 
 var oldTime;
 
@@ -114,13 +124,46 @@ function createPlotlyBar(data) {
 
     Plotly.newPlot('plotlyBar', plotlyData, layout);
 }
+function drawCircleWithPoint(pointX, pointY) {
+    var circleCanvas = document.getElementById('circleCanvas');
+    var ctxCircle = circleCanvas.getContext('2d');
 
+    var centerX = circleCanvas.width / 2;
+    var centerY = circleCanvas.height / 2;
+
+
+    ctxCircle.beginPath();
+    ctxCircle.arc(centerX, centerY, 200, 0, 2 * Math.PI, false);
+    ctxCircle.fillStyle = 'white';
+    ctxCircle.fill();
+    ctxCircle.lineWidth = 2;
+    ctxCircle.strokeStyle = '#003300';
+    ctxCircle.stroke();
+
+    ctxCircle.beginPath();
+    ctxCircle.arc(centerX, centerY, 80, 0, 2 * Math.PI, false);
+    ctxCircle.fillStyle = 'white';
+    ctxCircle.fill();
+    ctxCircle.lineWidth = 1;
+    ctxCircle.strokeStyle = '#003300';
+    ctxCircle.stroke();
+
+    // Draw a point in the middle of the circle
+    ctxCircle.beginPath();
+    ctxCircle.arc(centerX + pointX*2, centerY +pointY*2, 15, 0, 2 * Math.PI, false);
+    if ((pointX*2)**2+(pointY*2)**2 > 80**2) {
+        ctxCircle.fillStyle = 'red';
+    } else {
+        ctxCircle.fillStyle = 'green';
+    }
+    ctxCircle.fill();
+}
 
 // Update the Plotly graph when new data is received
 function updatePlotlyBar(newValue, lastValue, lastlastValue) {
     // checks for a peak in the data
     if (newValue < lastValue && lastValue > lastlastValue) {
-        if (lastValue > threshold) { // if the peak is above the threshold
+        if (lastValue > threshold * 0.7) { // if the peak is above the threshold
             Plotly.restyle('plotlyBar', 'x', [['Good Pressure']]);
             Plotly.restyle('plotlyBar', 'marker.color', ['green']);
         }
@@ -131,6 +174,43 @@ function updatePlotlyBar(newValue, lastValue, lastlastValue) {
     };
     Plotly.restyle('plotlyBar', 'y', [[newValue]]);
 
+}
+
+function createHorizontalBar(value1, value2) {
+    var percentageDifference = value1 - value2;
+
+    var plotlyData = [{
+        x: [percentageDifference],
+        y: ['Balance'],
+        type: 'bar',
+        orientation: 'h'
+    }];
+
+    var layout = {
+        height: 100, // Adjust height as needed
+        xaxis: {
+            range: [-threshold*1.5, threshold*1.5], // Define the range of the x-axis (adjust as needed)
+            showticklabels: false // Hide x-axis scale
+        },
+        margin: {t: 20, b: 50, l: 100, r: 50} // Adjust margins as needed
+    };
+
+    Plotly.newPlot('horizontalBar', plotlyData, layout);
+}
+
+function updateHorizontalBar(value2, value1) {
+    var Difference = value1 - value2  
+    if (Math.abs(value1 - value2) > threshold * 0.5) {
+        Plotly.restyle('horizontalBar', 'marker.color', ['red']);
+        
+    } else {
+        Plotly.restyle('horizontalBar', 'marker.color', ['green']);
+        // var Difference = 0;
+    }
+
+
+    // Update the horizontal bar with new balance value
+    Plotly.restyle('horizontalBar', 'x', [[Difference]]);
 }
 
 
@@ -146,6 +226,7 @@ function init()
     for (i=0; i < canvas.width/2; i++) {
         signalArray.push(100);
         filterArray.push(100);
+        thirdArray.push(100);
     }
     oldTime = new Date();
     console.log("init");
@@ -153,8 +234,13 @@ function init()
 
     // Call the function to create the Plotly graph with initial data
     createPlotlyBar(10); // Assuming initial value is 0
+    createHorizontalBar(0, 0);
 
-    
+    // Draw circle with point in the middle
+    var circleCanvas = document.getElementById('circleCanvas');
+    var ctxCircle = circleCanvas.getContext('2d');
+
+    drawCircleWithPoint(0,0);
 }
 
 function startBluetooth()
@@ -197,28 +283,36 @@ function animationLoop(timestamp)
     
     ctx.font = "12px Arial";
     ctx.fillStyle = "#FF0000";
+
     ctx.strokeStyle = "#000000";
-    
-    //var ctx = c.getContext("2d");
-    ctx.beginPath(0, canvas.height - signalArray[0]*canvas.height/1023);
+    ctx.beginPath(0, canvas.height - signalArray[0]*canvas.height/(threshold*1.5));
     for(i = 1; i < signalArray.length; i++){
-        ctx.lineTo(2*i, canvas.height - signalArray[i]*canvas.height/1023);
+        ctx.lineTo(2*i, canvas.height - signalArray[i]*canvas.height/(threshold*1.5));
     }
     ctx.stroke();
+
+    ctx.strokeStyle = "#008800";
+    ctx.beginPath(0, canvas.height - thirdArray[0]*canvas.height/(threshold*1.5));
+    for(i = 1; i < thirdArray.length; i++){
+        ctx.lineTo(2*i, canvas.height - thirdArray[i]*canvas.height/(threshold*1.5));
+    }
+    ctx.stroke();
+    
     
     ctx.strokeStyle = "#FF0000";
-    ctx.beginPath(0, canvas.height - filterArray[0]*canvas.height/1023);
+    ctx.beginPath(0, canvas.height - filterArray[0]*canvas.height/(threshold*1.5));
     for (i = 1; i < filterArray.length; i++) {
-        ctx.lineTo(2*i, canvas.height - filterArray[i]*canvas.height/1023);
+        ctx.lineTo(2*i, canvas.height - filterArray[i]*canvas.height/(threshold*1.5));
     }
     ctx.stroke();
+
     
     requestId = requestAnimationFrame(animationLoop);
 
 }
-function updatePlot(newVal, iscpr) {
+function updatePlot(newVal) {
     // Update the value
-    if (iscpr == 0) {
+    if (newVal == 0) {
         data[0].title = "No CPR";
         data[0].value = 0;
     } else { 
@@ -237,6 +331,7 @@ function updatePlot(newVal, iscpr) {
     Plotly.react('plotlyGauge', data, layout);
 }
 
+
 function handleNotifications(event){
     var result = "";
     for (i = 0; i < event.target.value.byteLength; i++) {
@@ -245,17 +340,22 @@ function handleNotifications(event){
 
     console.log(result);
     var values = result.split(' ');
+
+    left = parseInt(values[0]);
+    right = parseInt(values[1]);
+    down =  parseInt(values[3]);
     
-    if (values[0] == "BPM") {
-        setBPM(parseInt(values[1]));
-        return;
-    }
-    
-    signal = parseInt(values[0]);
+    signal = left;
     
     signalArray.shift();
-    signalArray.push(signal);
-  
+    signalArray.push(left);
+        
+    filterArray.shift();
+    filterArray.push(right);
+    
+    thirdArray.shift();
+    thirdArray.push(down);
+    
     
 
 
@@ -263,19 +363,23 @@ function handleNotifications(event){
         eval(myFunction);
         return;
     }
-    
-    if (values.length >= 2) {
-        filterArray.shift();
-        filterArray.push(parseInt(values[1]));
-    }
+
     
     if (values.length >= 3) {
         setBPM(parseInt(values[2]));
     }
 
-    updatePlot(parseInt(values[2]), parseInt(values[3]));
+
+    updatePlot(parseInt(values[2]));
     // Call this function whenever you receive new data
-    updatePlotlyBar(signalArray[signalArray.length - 1], signalArray[signalArray.length - 2], signalArray[signalArray.length - 3]);
+    updatePlotlyBar(
+        (signalArray[signalArray.length - 1]+filterArray[filterArray.length - 1]+thirdArray[thirdArray.length - 1])/3,
+        (signalArray[signalArray.length - 2]+filterArray[filterArray.length - 2]+thirdArray[thirdArray.length - 2])/3,
+        (signalArray[signalArray.length - 3]+filterArray[filterArray.length - 3]+thirdArray[thirdArray.length - 3])/3
+    );  
+    updateHorizontalBar(parseInt(left), parseInt(right));
+
+    drawCircleWithPoint(right - left, down - (left+right) / 2);
 }
 
 function setBPM(bpm)
