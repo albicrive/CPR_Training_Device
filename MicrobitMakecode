@@ -1,0 +1,124 @@
+let connected = 0
+
+let signal = 0
+let signal2 = 0
+let signal3 = 0
+let a = 0
+let b = 0
+let c = 0
+let signal_f = pins.analogReadPin(AnalogPin.P0)
+let signal_f2 = pins.analogReadPin(AnalogPin.P1)
+let signal_f3 = pins.analogReadPin(AnalogPin.P2)
+let m = 0
+let alphasignal = 0.4
+let alphamean = 0.08
+let alphaBPM = 0.1
+let speed = 0
+
+let isUnder = 0
+let time = 0
+let oldtime = 0
+let timediff = [545]
+let meantimediff = 0
+let beats = 0
+let bpm = 0
+let bpm_f = 0
+let sendBPM = 0
+let campionbeat = 8
+for (let j = 0; j < campionbeat; j++) {
+    timediff[j] = 545
+}
+
+basic.showIcon(IconNames.Sad)
+
+bluetooth.startUartService()
+
+bluetooth.onBluetoothConnected(function () {
+    connected = 1
+    basic.showLeds(`
+        . . . . .
+        . # . # .
+        . # # # .
+        . . # . .
+        . . . . .
+        `)
+})
+
+bluetooth.onBluetoothDisconnected(function () {
+    connected = 0
+    basic.showIcon(IconNames.Sad)
+})
+input.onButtonPressed(Button.A, function() {
+    a = pins.analogReadPin(AnalogPin.P0)
+    b = pins.analogReadPin(AnalogPin.P1)
+    c = pins.analogReadPin(AnalogPin.P2)
+})
+
+basic.forever(function () {
+    basic.pause(10)
+    if (connected == 1) {
+        time = input.runningTime()
+
+        signal = pins.analogReadPin(AnalogPin.P0) - a
+        signal2 = pins.analogReadPin(AnalogPin.P1) - b
+        signal3 = pins.analogReadPin(AnalogPin.P2) - c
+        signal_f  = alphasignal * signal  + (1 - alphasignal) * signal_f
+        signal_f2 = alphasignal * signal2 + (1 - alphasignal) * signal_f2
+        signal_f3 = alphasignal * signal3 + (1 - alphasignal) * signal_f3
+        m = alphamean * signal + (1 - alphamean) * m
+        if (m < 5){
+            m = 5
+        }
+        if (signal_f > m && isUnder == 1) {
+            isUnder = 0
+            led.toggle(1, 0)
+            led.toggle(3, 0)
+            led.toggle(0, 1)
+            led.toggle(0, 2)
+            led.toggle(1, 3)
+            led.toggle(2, 4)
+            led.toggle(3, 3)
+            led.toggle(4, 1)
+            led.toggle(4, 2)
+        }
+        if (signal_f < m && isUnder == 0) {
+            if(time-oldtime < 5000){
+                timediff[beats % campionbeat] = time - oldtime
+            }
+            oldtime = time
+            meantimediff = timediff.reduce((a, b) => a + b, 0) / campionbeat
+            bpm = 60000 / meantimediff
+            beats += 1
+            isUnder = 1
+            led.toggle(1, 0)
+            led.toggle(3, 0)
+            led.toggle(0, 1)
+            led.toggle(0, 2)
+            led.toggle(1, 3)
+            led.toggle(2, 4)
+            led.toggle(3, 3)
+            led.toggle(4, 1)
+            led.toggle(4, 2)
+            
+        }
+        if (time-oldtime > 5000) {
+            speed = 0
+            for (let j = 0; j < campionbeat; j++) {
+                timediff[j] = 545
+            }
+            meantimediff = timediff.reduce((a, b) => a + b, 0) / campionbeat
+            bpm = 60000 / meantimediff
+            bpm_f = 0
+        }
+        else {speed = 1}
+        
+        bpm_f = alphaBPM * bpm + (1 - alphaBPM) * bpm_f
+        if (speed == 0) {
+            sendBPM = 0
+        }else {
+            sendBPM = bpm_f
+        }
+
+    bluetooth.uartWriteLine("" + convertToText(Math.round(signal_f)) + " " + convertToText(Math.round(signal_f2)) + " " + convertToText(Math.round(sendBPM)) + " " + convertToText(Math.round(signal_f3)))
+    }})
+
