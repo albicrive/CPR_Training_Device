@@ -3,6 +3,7 @@
 <head>
 <title>HTML5 WebBLE Gateway for heart rate</title>
 <style type="text/css">
+    /* Existing CSS styles */
     canvas { border: 1px solid black; }
     textarea { resize: both; font-family: Consolas,Monaco,Lucida Console,Liberation Mono,DejaVu Sans Mono,Bitstream Vera Sans Mono,Courier New, monospace; }
     div.bpm { display: inline; }
@@ -28,6 +29,7 @@
     #circleCanvas {
         border: 1px solid transparent;
     }
+
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.48.4/codemirror.css">
 
@@ -40,24 +42,40 @@
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 
 <p>
-<div class="bpm">CPR Rate:</div>
-<div class="bpm" id="bpmValue">60</div>
-<div class="bpm">BPM</div>
-</p>
+    <!-- Existing BPM display -->
+    <div class="bpm">CPR Rate:</div>
+    <div class="bpm" id="bpmValue">60</div>
+    <div class="bpm">BPM</div>
+    </p>
+    
+    <!-- Existing canvas elements -->
+    <canvas id="myCanvas" width="400" height="341" style="display: none;"></canvas>
+    <table id="sessionTable" style="display: none;">
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>BPM Score</th>
+                <th>Pressure Score</th>
+                <th>Position Score</th>
+                <th>Total Score</th>
+                <th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Rows will be dynamically added by JavaScript -->
+        </tbody>
+    </table>
+    <div id="plotlyGauge"></div>
+    <div id="plotlyBar"></div>
+    <canvas id="circleCanvas" width="500" height="500"></canvas>
 
-<canvas id="myCanvas" width="400" height="341"></canvas>
-<div id="plotlyGauge"></div>
-<div id="plotlyBar"></div>
-</p>
-<canvas id="circleCanvas" width="500" height="500"></canvas>
-<p>
-<div id="horizontalBar"></div>
-</p>
-<p>
-<button onclick="start()">Start sensor</button>
-<button onclick="stop()">Stop sensor</button>
-</p>
+    <p>
+    <button onclick="start()">Start sensor</button>
+    <button onclick="stop()">Stop sensor</button>
+    <button id="toggleButton" onclick="toggleVisibility()">Toggle Animation/Table</button>
 
+</p>
+    
 
 <script>
                                          
@@ -67,7 +85,28 @@ var signal;
 var signalArray = [];
 var filterArray = [];
 var thirdArray = [];
-var threshold = 50;
+var BPMlog = [];
+var sessionData = [];
+
+
+var threshold = 50; //Change this value to adjust the threshold for the bar graph ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+var startTime = 0;
+var scoreBPM = 0;
+var scorePressure = 0;
+var scorePosition = 0;
+var goodPressure = 0;
+var badPressure = 0;
+var goodcircle = 0;
+var badcircle = 0;
+
+
+
+var sessionRunning = false;
+
+var isnewsession = true;
+
+
 
 var oldTime;
 
@@ -78,7 +117,7 @@ var myFunction;
 const BLE_UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const BLE_UART_RX_CHAR = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 
-// Create the data for the plot
+// Create Layout --------------------------------------------------------------------------------------------------------------------------
 var data = [{
     type: "indicator",
     mode: "gauge",
@@ -105,6 +144,8 @@ var layout = {
     paper_bgcolor: "white",
     font: {color: "black"}
 };
+
+
 
 function createPlotlyBar(data) {
     var plotlyData = [{
@@ -141,7 +182,7 @@ function drawCircleWithPoint(pointX, pointY) {
     ctxCircle.stroke();
 
     ctxCircle.beginPath();
-    ctxCircle.arc(centerX, centerY, 80, 0, 2 * Math.PI, false);
+    ctxCircle.arc(centerX, centerY, 100, 0, 2 * Math.PI, false);
     ctxCircle.fillStyle = 'white';
     ctxCircle.fill();
     ctxCircle.lineWidth = 1;
@@ -151,129 +192,66 @@ function drawCircleWithPoint(pointX, pointY) {
     // Draw a point in the middle of the circle
     ctxCircle.beginPath();
     ctxCircle.arc(centerX + pointX*2, centerY +pointY*2, 15, 0, 2 * Math.PI, false);
-    if ((pointX*2)**2+(pointY*2)**2 > 80**2) {
+    if ((pointX*2)**2+(pointY*2)**2 > 100**2) {
         ctxCircle.fillStyle = 'red';
+        iscirclein = false;
     } else {
         ctxCircle.fillStyle = 'green';
+        iscirclein = true;
     }
     ctxCircle.fill();
 }
 
-// Update the Plotly graph when new data is received
+// Update plots --------------------------------------------------------------------------------------------------------------------------
+
 function updatePlotlyBar(newValue, lastValue, lastlastValue) {
     // checks for a peak in the data
     if (newValue < lastValue && lastValue > lastlastValue) {
+        if (lastValue > threshold * 0.1) {
+            if (iscirclein) {
+                goodcircle++;
+            } else {
+                badcircle++;
+            }
+        }
         if (lastValue > threshold * 0.7) { // if the peak is above the threshold
             Plotly.restyle('plotlyBar', 'x', [['Good Pressure']]);
             Plotly.restyle('plotlyBar', 'marker.color', ['green']);
+            goodPressure++;
+
         }
-       else {
+        else {
             Plotly.restyle('plotlyBar', 'x', [['Not enough Pressure']]);
             Plotly.restyle('plotlyBar', 'marker.color', ['red']);
+            if (lastValue > threshold * 0.1) { // remove noise
+                badPressure++;
+            }
         }
-    };
+    }
+
     Plotly.restyle('plotlyBar', 'y', [[newValue]]);
 
 }
 
-function createHorizontalBar(value1, value2) {
-    var percentageDifference = value1 - value2;
-
-    var plotlyData = [{
-        x: [percentageDifference],
-        y: ['Balance'],
-        type: 'bar',
-        orientation: 'h'
-    }];
-
-    var layout = {
-        height: 100, // Adjust height as needed
-        xaxis: {
-            range: [-threshold*1.5, threshold*1.5], // Define the range of the x-axis (adjust as needed)
-            showticklabels: false // Hide x-axis scale
-        },
-        margin: {t: 20, b: 50, l: 100, r: 50} // Adjust margins as needed
-    };
-
-    Plotly.newPlot('horizontalBar', plotlyData, layout);
-}
-
-function updateHorizontalBar(value2, value1) {
-    var Difference = value1 - value2  
-    if (Math.abs(value1 - value2) > threshold * 0.5) {
-        Plotly.restyle('horizontalBar', 'marker.color', ['red']);
-        
-    } else {
-        Plotly.restyle('horizontalBar', 'marker.color', ['green']);
-        // var Difference = 0;
+function updatePlot(newVal) {
+    // Update the value
+    if (newVal == 0) {
+        data[0].title = "No CPR";
+        data[0].value = 0;
+    } else { 
+        data[0].value = newVal;
+        if (newVal < 100) {
+            data[0].title = "Too slow";
+        } else if (newVal > 120) {
+            data[0].title = "Too fast";
+        } else {
+            data[0].title = "Good";
+        }
     }
+    
 
-
-    // Update the horizontal bar with new balance value
-    Plotly.restyle('horizontalBar', 'x', [[Difference]]);
-}
-
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function init()
-{
-    canvas = document.getElementById('myCanvas');
-    val = document.getElementById('bpmValue');
-    ctx = canvas.getContext('2d');
-    for (i=0; i < canvas.width/2; i++) {
-        signalArray.push(100);
-        filterArray.push(100);
-        thirdArray.push(100);
-    }
-    oldTime = new Date();
-    console.log("init");
-    Plotly.newPlot('plotlyGauge', data, layout);
-
-    // Call the function to create the Plotly graph with initial data
-    createPlotlyBar(10); // Assuming initial value is 0
-    createHorizontalBar(0, 0);
-
-    // Draw circle with point in the middle
-    var circleCanvas = document.getElementById('circleCanvas');
-    var ctxCircle = circleCanvas.getContext('2d');
-
-    drawCircleWithPoint(0,0);
-}
-
-function startBluetooth()
-{
-    console.log('Requesting Bluetooth Device...');
-    navigator.bluetooth.requestDevice({filters: [                                                                                   {services: [BLE_UART_SERVICE]},
-                                          {namePrefix: 'BBC micro:bit '}]})
-    .then(device => {
-          console.log('Connecting to GATT Server...');
-          targetDevice = device;
-          return device.gatt.connect();
-    })
-    .then(server => {
-          console.log('Getting Service...');
-          return server.getPrimaryService(BLE_UART_SERVICE);
-    })
-    .then(service => {
-          console.log('Got service');
-          return service.getCharacteristic(BLE_UART_RX_CHAR);
-    })
-    .then(characteristic => {
-          console.log('Got char');
-          charUARTRX = characteristic;
-          return charUARTRX.startNotifications();
-    })
-    .then(_ => {
-          console.log('Notifications started');
-          charUARTRX.addEventListener('characteristicvaluechanged',
-                                            handleNotifications);
-    })
-    .catch(error =>{
-         console.log(error);
-    });
+    // Replot the plot
+    Plotly.react('plotlyGauge', data, layout);
 }
 
 function animationLoop(timestamp)
@@ -310,27 +288,53 @@ function animationLoop(timestamp)
     requestId = requestAnimationFrame(animationLoop);
 
 }
-function updatePlot(newVal) {
-    // Update the value
-    if (newVal == 0) {
-        data[0].title = "No CPR";
-        data[0].value = 0;
-    } else { 
-        data[0].value = newVal;
-        if (newVal < 100) {
-            data[0].title = "Too slow";
-        } else if (newVal > 120) {
-            data[0].title = "Too fast";
-        } else {
-            data[0].title = "Good";
-        }
-    }
-    
 
-    // Replot the plot
-    Plotly.react('plotlyGauge', data, layout);
+function updateSessionTable() {
+    // Limit session data to the last 5 sessions
+    sessionData = sessionData.reverse();
+
+    var tableBody = document.querySelector('#sessionTable tbody');
+    tableBody.innerHTML = '';
+
+    // Populate table with session data
+    sessionData.forEach(function(session, index) {
+        var row = tableBody.insertRow();
+        row.insertCell().textContent = index + 1;
+        row.insertCell().textContent = session.bpmScore;
+        row.insertCell().textContent = session.pressureScore;
+        row.insertCell().textContent = session.positionScore;
+        row.insertCell().textContent = session.totalScore;
+        row.insertCell().textContent = session.time;
+    });
 }
+//Functional --------------------------------------------------------------------------------------------------------------------------
 
+
+function init()
+{
+    canvas = document.getElementById('myCanvas');
+    val = document.getElementById('bpmValue');
+
+    ctx = canvas.getContext('2d');
+    for (i=0; i < canvas.width/2; i++) {
+        signalArray.push(100);
+        filterArray.push(100);
+        thirdArray.push(100);
+    }
+    oldTime = new Date();
+    console.log("init");
+    Plotly.newPlot('plotlyGauge', data, layout);
+
+    // Call the function to create the Plotly graph with initial data
+    createPlotlyBar(10); // Assuming initial value is 0
+
+
+    // Draw circle with point in the middle
+    var circleCanvas = document.getElementById('circleCanvas');
+    var ctxCircle = circleCanvas.getContext('2d');
+
+    drawCircleWithPoint(0,0);
+}
 
 function handleNotifications(event){
     var result = "";
@@ -355,9 +359,6 @@ function handleNotifications(event){
     
     thirdArray.shift();
     thirdArray.push(down);
-    
-    
-
 
     if (myFunction) {
         eval(myFunction);
@@ -377,14 +378,158 @@ function handleNotifications(event){
         (signalArray[signalArray.length - 2]+filterArray[filterArray.length - 2]+thirdArray[thirdArray.length - 2])/3,
         (signalArray[signalArray.length - 3]+filterArray[filterArray.length - 3]+thirdArray[thirdArray.length - 3])/3
     );  
-    updateHorizontalBar(parseInt(left), parseInt(right));
+
 
     drawCircleWithPoint(right - left, down - (left+right) / 2);
+
+    //scoring system
+
+    if (parseInt(values[2]) == 0) {
+        if (sessionRunning) {
+            endSession();
+        } else {
+            isnewsession = true;
+        }
+    } else {
+        if (isnewsession) {
+            sessionRunning = true;
+            isnewsession = false;
+            goodPressure = 0;
+            badPressure = 0;
+            goodcircle = 0;
+            badcircle = 0;
+            BPMlog = [];
+            startTime = runningTime();
+        }
+    }
+
+// Push the value to BPMlog array
+BPMlog.push(parseInt(values[2]));
+        
+}
+
+// Extra --------------------------------------------------------------------------------------------------------------------------
+function endSession() {
+    scoreBPM = calculateScore(calculateMean(BPMlog));
+    scorePressure = goodPressure * 100 / (badPressure + goodPressure);
+    scorePosition = goodcircle * 100/ (badcircle + goodcircle);
+    // var textContentString = "Score BPM: " + scoreBPM.toFixed(2) +
+    // "%, Score Pressure: " + scorePressure.toFixed(2) +
+    // "%, Score Position: " + scorePosition.toFixed(2) +
+    // "%, Total Score: " + ((scoreBPM + scorePressure + scorePosition) / 3).toFixed(2) +
+    // "%, Good Pressure: " + goodPressure +
+    // ", Bad Pressure: " + badPressure +
+    // ", Good Circle: " + goodcircle +
+    // ", Bad Circle: " + badcircle +
+    // ", Mean BPM Log: " + calculateMean(BPMlog) 
+    // + ", Time: " + (runningTime() - startTime) / 1000 + "s";
+    // val.textContent = textContentString;
+
+    var session = {
+        bpmScore: scoreBPM.toFixed(1),
+        pressureScore: scorePressure.toFixed(1),
+        positionScore: scorePosition.toFixed(1),
+        totalScore: ((scoreBPM + scorePressure + scorePosition) / 3).toFixed(1),
+        time: ((runningTime() - startTime - 2500) / 1000).toFixed(2) + "s"
+    };
+
+    sessionData.push(session);
+    updateSessionTable();
+    displayScoresWindow()
+
+    sessionRunning = false;
+
+    
+}
+
+function toggleVisibility() {
+    var canvas = document.getElementById('myCanvas');
+    var table = document.getElementById('sessionTable');
+    var button = document.getElementById('toggleButton');
+
+    if (canvas.style.display === 'none') {
+        canvas.style.display = 'block';
+        table.style.display = 'block';
+        button.textContent = 'Hide Table/Animation';
+    } else {
+        canvas.style.display = 'none';
+        table.style.display = 'none';
+        button.textContent = 'Show Table/Animation';
+    }
+}
+
+
+function calculateMean(arr) {
+    if (arr.length === 0) {
+        return 0; // Return 0 if the array is empty to avoid division by zero
+    }
+    
+    var sum = arr.reduce(function(acc, val) {
+        return acc + val;
+    }, 0);
+
+    return sum / arr.length;
+}
+
+function calculateScore(value) {
+    const targetValue = 110; // Target value for maximum score
+    const maxScore = 100; // Maximum score
+    
+    // Calculate the difference between the given value and the target value
+    const difference = Math.abs(value - targetValue);
+    
+    // Calculate the score based on the difference
+    let score = maxScore - difference*2;
+    
+    // Ensure the score is within the range [0, 100]
+    score = Math.max(0, Math.min(score, maxScore));
+    
+    return score;
+}
+
+function displayScoresWindow() {
+    // Calculate scores and time as before
+
+    // Construct HTML content for the new window
+    var content = `
+        <html>
+        <head>
+            <title>Session Scores</title>
+            <style>
+                body {
+                    font-size: 36px;
+                    text-align: center;
+                    padding-top: 50px;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Session Scores</h1>
+            <p>Mean BPM: ${calculateMean(BPMlog).toFixed(2)}</p>
+            <p>BPM Score: ${scoreBPM.toFixed(2)}%</p>
+            <p>Pressure Score: ${scorePressure.toFixed(2)}%</p>
+            <p>Position Score: ${scorePosition.toFixed(2)}%</p>
+            <p>Total Score: ${((scoreBPM + scorePressure + scorePosition) / 3).toFixed(2)}%</p>
+            <p>Time: ${(runningTime() - startTime - 2500) / 1000} s</p>
+        </body>
+        </html>
+    `;
+
+    // Open a new window with the HTML content
+    var newWindow = window.open('', 'SessionScores', 'width=600,height=800');
+    newWindow.document.open();
+    newWindow.document.write(content);
+    newWindow.document.close();
+}
+
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function setBPM(bpm)
 {
-    val.textContent = bpm;
+    //val.textContent = bpm;
 }
 
 function setMean(mean)
@@ -433,6 +578,39 @@ function stop()
             console.log('Argh! ' + error);
         });
     }
+}
+
+function startBluetooth()
+{
+    console.log('Requesting Bluetooth Device...');
+    navigator.bluetooth.requestDevice({filters: [                                                                                   {services: [BLE_UART_SERVICE]},
+                                          {namePrefix: 'BBC micro:bit '}]})
+    .then(device => {
+          console.log('Connecting to GATT Server...');
+          targetDevice = device;
+          return device.gatt.connect();
+    })
+    .then(server => {
+          console.log('Getting Service...');
+          return server.getPrimaryService(BLE_UART_SERVICE);
+    })
+    .then(service => {
+          console.log('Got service');
+          return service.getCharacteristic(BLE_UART_RX_CHAR);
+    })
+    .then(characteristic => {
+          console.log('Got char');
+          charUARTRX = characteristic;
+          return charUARTRX.startNotifications();
+    })
+    .then(_ => {
+          console.log('Notifications started');
+          charUARTRX.addEventListener('characteristicvaluechanged',
+                                            handleNotifications);
+    })
+    .catch(error =>{
+         console.log(error);
+    });
 }
 
 
