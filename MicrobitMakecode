@@ -3,6 +3,7 @@ let connected = 0
 let signal = 0
 let signal2 = 0
 let signal3 = 0
+let signaltot = 0
 let a = 0
 let b = 0
 let c = 0
@@ -65,11 +66,12 @@ basic.forever(function () {
         signal_f  = alphasignal * signal  + (1 - alphasignal) * signal_f
         signal_f2 = alphasignal * signal2 + (1 - alphasignal) * signal_f2
         signal_f3 = alphasignal * signal3 + (1 - alphasignal) * signal_f3
-        m = alphamean * signal + (1 - alphamean) * m
-        if (m < 5){
-            m = 5
+        signaltot = (signal_f + signal_f2 + signal_f3 ) / 3
+        m = alphamean * signaltot + (1 - alphamean) * m
+        if (m < 7){
+            m = 7
         }
-        if (signal_f > m && isUnder == 1) {
+        if (signaltot > m && isUnder == 1) {
             isUnder = 0
             led.toggle(1, 0)
             led.toggle(3, 0)
@@ -81,7 +83,7 @@ basic.forever(function () {
             led.toggle(4, 1)
             led.toggle(4, 2)
         }
-        if (signal_f < m && isUnder == 0) {
+        if (signaltot < m && isUnder == 0) {
             if(time-oldtime < 5000){
                 timediff[beats % campionbeat] = time - oldtime
             }
@@ -101,14 +103,14 @@ basic.forever(function () {
             led.toggle(4, 2)
             
         }
-        if (time-oldtime > 5000) {
+        if (time-oldtime > 2500) {
             speed = 0
             for (let j = 0; j < campionbeat; j++) {
                 timediff[j] = 545
             }
             meantimediff = timediff.reduce((a, b) => a + b, 0) / campionbeat
             bpm = 60000 / meantimediff
-            bpm_f = 0
+            bpm_f = 110
         }
         else {speed = 1}
         
