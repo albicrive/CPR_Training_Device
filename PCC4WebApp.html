@@ -91,6 +91,7 @@ var sessionData = [];
 
 var threshold = 50; //Change this value to adjust the threshold for the bar graph ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+var newWindow = null;
 var startTime = 0;
 var scoreBPM = 0;
 var scorePressure = 0;
@@ -169,9 +170,10 @@ function drawCircleWithPoint(pointX, pointY) {
     var circleCanvas = document.getElementById('circleCanvas');
     var ctxCircle = circleCanvas.getContext('2d');
 
+    ctxCircle.fillStyle = 'white';
     var centerX = circleCanvas.width / 2;
     var centerY = circleCanvas.height / 2;
-    ctxCircle.fillStyle = 'white';
+
 
     ctxCircle.beginPath();
     ctxCircle.arc(centerX, centerY, 200, 0, 2 * Math.PI, false);
@@ -400,6 +402,7 @@ function handleNotifications(event){
             badcircle = 0;
             BPMlog = [];
             startTime = runningTime();
+            newWindow.close();
         }
     }
 
@@ -516,7 +519,7 @@ function displayScoresWindow() {
     `;
 
     // Open a new window with the HTML content
-    var newWindow = window.open('', 'SessionScores', 'width=600,height=800');
+    newWindow = window.open('', 'SessionScores', 'width=600,height=800');
     newWindow.document.open();
     newWindow.document.write(content);
     newWindow.document.close();
